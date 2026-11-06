@@ -1,4 +1,4 @@
-// kreepj.js - Open-Source JVM Runtime, JAR Packer, Verifier, JNI, GC, Threads, ClassLoader, Interpreter, Reflection, Network, JDBC, Dashboard & CLI Wrapper API
+// kreepj.js - Open-Source JVM Runtime
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
