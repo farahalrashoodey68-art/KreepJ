@@ -1,0 +1,29 @@
+{
+  "name": "kreepj",
+  "version": "1.0.0",
+  "description": "A free, high-performance open-source JVM runtime and API in JavaScript and WebAssembly for Node.js and browsers.",
+  "type": "module",
+  "main": "kreepj.js",
+  "bin": {
+    "kreepj": "./bin/cli.mjs"
+  },
+  "scripts": {
+    "start": "node bin/cli.mjs dashboard 3000",
+    "test": "node --test"
+  },
+  "keywords": [
+    "jvm",
+    "java",
+    "webassembly",
+    "runtime",
+    "cheerpj",
+    "interpreter",
+    "bytecode",
+    "jar"
+  ],
+  "author": "Kreepix",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
