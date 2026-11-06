@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build outputs, JARs, and compiled classes
+build/
+dist/
+*.jar
+*.class
+
+# Environment variables & local logs
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# OS specific files
+.DS_Store
+Thumbs.db
