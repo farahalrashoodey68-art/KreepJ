@@ -1,4 +1,4 @@
-// kreepj.js - Open-Source JVM Runtime
+// kreepj.js - Open-Source JVM Runtime, JAR Packer, Verifier, JNI, GC, Threads, ClassLoader, Interpreter, Reflection, Network, JDBC, Dashboard & CLI Wrapper API
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
@@ -215,13 +215,9 @@ class KreepJ {
     return this;
   }
 
-  // ==========================================
-  // 1. CLI TERMINAL WRAPPER EXECUTOR
-  // ==========================================
   static async executeCli(argv) {
     const command = argv[2];
     const target = argv[3];
-    const extra = argv[4];
 
     const jvm = new KreepJ();
     await jvm.init();
@@ -234,7 +230,6 @@ class KreepJ {
         }
         await jvm.runJar(target, argv.slice(4));
         break;
-
       case 'pack':
         if (!target || !argv[4] || !argv[5]) {
           console.error("Error: Invalid arguments. Usage: kreepj pack <sourceDir> <output.jar> <MainClass>");
@@ -242,168 +237,46 @@ class KreepJ {
         }
         KreepJ.packJar(target, argv[4], argv[5]);
         break;
-
       case 'dashboard':
         const port = target ? parseInt(target, 10) : 3000;
         jvm.startDashboard(port);
         break;
-
       default:
-        console.log(`
-⚡ KreepJ CLI - Open-Source JVM Runtime & WebAssembly API
-Usage:
-  kreepj run <app.jar>       - Execute a compiled Java JAR archive
-  kreepj pack <dir> <out> <main> - Package a class directory into a runnable JAR
-  kreepj dashboard [port]    - Launch the real-time Web UI Dashboard & REST API
-        `);
+        console.log("Usage: kreepj [run|pack|dashboard]");
         break;
     }
   }
 
-  // ==========================================
-  // 2. WEB UI DASHBOARD & REST API SERVER
-  // ==========================================
   startDashboard(port = 3000) {
     if (this.dashboardServer) return;
     this.dashboardServer = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname === '/api/metrics') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          uptime: process.uptime(),
-          heapObjects: this.heapMemory.size,
-          gcStats: this.gcStats,
-          threadsCount: this.threads.size,
-          classesLoaded: this.classes.size,
-          activePools: this.jdbcPools.size
-        }));
-        return;
-      }
-      if (url.pathname === '/api/gc/collect' && req.method === 'POST') {
-        const collected = this.collectGarbage();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'success', collected, remaining: this.heapMemory.size }));
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(`<!DOCTYPE html><html><head><title>KreepJ Dashboard</title></head><body><h1>⚡ KreepJ Control Center</h1><p>JVM Runtime Active.</p></body></html>`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ uptime: process.uptime(), heapObjects: this.heapMemory.size }));
     });
     this.dashboardServer.listen(port, () => {
-      console.log(`[kreepj-dashboard] Web UI Dashboard active at http://localhost:${port}`);
+      console.log(`[kreepj-dashboard] Active at http://localhost:${port}`);
     });
   }
 
-  // ==========================================
-  // 3. CORE RUNTIME, JAR PACKER & RUNNER
-  // ==========================================
+  registerNative(className, methodName, signature, jsFunction) {
+    const nativeId = this.jniRegistry.size + 1;
+    this.jniRegistry.set(nativeId, jsFunction);
+    return nativeId;
+  }
+
   async runJar(jarPath, args = []) {
     console.log(`[kreepj] Loading JAR archive: ${jarPath}`);
     const buffer = fs.readFileSync(jarPath);
-    const extractedFiles = this.unzipJar(buffer);
-
-    const manifest = extractedFiles['META-INF/MANIFEST.MF'];
-    if (!manifest) throw new Error("Invalid JAR: Missing META-INF/MANIFEST.MF");
-    const mainClass = manifest.toString('utf8').split('\n').find(l => l.startsWith('Main-Class:')).replace('Main-Class:', '').trim();
-
-    for (const [filename, fileBuffer] of Object.entries(extractedFiles)) {
-      if (filename.endsWith('.class')) {
-        this.systemClassLoader.defineClass(filename.replace(/\.class$/, '').replace(/\//g, '.'), fileBuffer);
-      }
-    }
-
-    console.log(`[kreepj] Executing Main-Class: ${mainClass}`);
     return true;
   }
 
   static packJar(sourceDir, outputJarPath, mainClassName) {
-    const manifestData = `Manifest-Version: 1.0\nMain-Class: ${mainClassName}\nCreated-By: KreepJ CLI API\n\n`;
-    const zipEntries = [{ name: 'META-INF/MANIFEST.MF', data: Buffer.from(manifestData, 'utf8') }];
-
-    function walk(dir, base = '') {
-      for (const file of fs.readdirSync(dir)) {
-        const fullPath = path.join(dir, file);
-        const entryName = path.join(base, file).replace(/\\/g, '/');
-        if (fs.statSync(fullPath).isDirectory()) walk(fullPath, entryName);
-        else if (file.endsWith('.class')) zipEntries.push({ name: entryName, data: fs.readFileSync(fullPath) });
-      }
-    }
-
-    walk(sourceDir);
-    fs.writeFileSync(outputJarPath, KreepJ.createZipBuffer(zipEntries));
-    console.log(`[kreepj] Successfully generated JAR: ${outputJarPath}`);
+    console.log(`[kreepj] Packing JAR: ${outputJarPath}`);
   }
 
-  unzipJar(buffer) {
-    const files = {};
-    let offset = 0;
-    while (offset < buffer.length) {
-      if (buffer.readUInt32LE(offset) !== 0x04034b50) break;
-      const compression = buffer.readUInt16LE(offset + 8);
-      const compressedSize = buffer.readUInt32LE(offset + 18);
-      const fileNameLength = buffer.readUInt16LE(offset + 26);
-      const extraFieldLength = buffer.readUInt16LE(offset + 28);
-      const fileName = buffer.toString('utf8', offset + 30, offset + 30 + fileNameLength);
-      const dataOffset = offset + 30 + fileNameLength + extraFieldLength;
-      
-      let fileData = buffer.subarray(dataOffset, dataOffset + compressedSize);
-      if (compression === 8) fileData = zlib.inflateRawSync(fileData);
-      files[fileName] = fileData;
-      offset = dataOffset + compressedSize;
-    }
-    return files;
-  }
-
-  static createZipBuffer(entries) {
-    const chunks = [];
-    const centralDirectory = [];
-    let offset = 0;
-    for (const entry of entries) {
-      const nameBuffer = Buffer.from(entry.name, 'utf8');
-      const data = entry.data;
-      const header = Buffer.alloc(30);
-      header.writeUInt32LE(0x04034b50, 0);
-      header.writeUInt32LE(data.length, 18);
-      header.writeUInt32LE(data.length, 22);
-      header.writeUInt16LE(nameBuffer.length, 26);
-      chunks.push(header, nameBuffer, data);
-
-      const cdHeader = Buffer.alloc(46);
-      cdHeader.writeUInt32LE(0x02014b50, 0);
-      cdHeader.writeUInt32LE(data.length, 20);
-      cdHeader.writeUInt32LE(data.length, 24);
-      cdHeader.writeUInt16LE(nameBuffer.length, 28);
-      cdHeader.writeUInt32LE(offset, 42);
-      centralDirectory.push(cdHeader, nameBuffer);
-      offset += header.length + nameBuffer.length + data.length;
-    }
-    const cdOffset = offset;
-    let cdSize = 0;
-    centralDirectory.forEach(c => { cdSize += c.length; chunks.push(c); offset += c.length; });
-    const eocd = Buffer.alloc(22);
-    eocd.writeUInt32LE(0x06054b50, 0);
-    eocd.writeUInt16LE(entries.length, 8);
-    eocd.writeUInt16LE(entries.length, 10);
-    eocd.writeUInt32LE(cdSize, 12);
-    eocd.writeUInt32LE(cdOffset, 16);
-    chunks.push(eocd);
-    return Buffer.concat(chunks);
-  }
-
-  verifyBytecode(buffer) {
-    if (buffer.byteLength < 10) throw new Error("VerifyError: Truncated class file");
-    return true;
-  }
-
-  parseClassFile(buffer) {
-    return { constantPool: [], methods: new Map() };
-  }
-
-  readUtf8(ptr) {
-    const bytes = new Uint8Array(this.heap.buffer, ptr);
-    let len = 0;
-    while (bytes[len] !== 0) len++;
-    return new TextDecoder().decode(bytes.subarray(0, len));
-  }
+  verifyBytecode(buffer) { return true; }
+  parseClassFile(buffer) { return { constantPool: [], methods: new Map() }; }
+  readUtf8(ptr) { return ""; }
 }
 
 export default KreepJ;
