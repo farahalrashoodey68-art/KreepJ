@@ -136,3 +136,4 @@ kreepj pack ./build app.jar com.example.Main
 kreepj dashboard 3000
 
 License
+Distributed under the MIT License. See LICENSE for details.
